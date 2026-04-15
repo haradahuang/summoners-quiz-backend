@@ -5,24 +5,63 @@ import { Server, Socket } from 'socket.io';
 const app = express();
 const server = http.createServer(app);
 
-// 👇 新增這段：專門做給 Render 雲端主機的「健康檢查 (Health Check)」
 app.get('/', (req, res) => {
   res.send('✅ 天空之島伺服器正常運作中！(Server is running)');
 });
 
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
+// 全域題庫 (預設先放一題，防止空蕩蕩)
+let questionBank: any[] = [
+  {
+    id: Date.now(),
+    text: "在《魔靈召喚》中，哪一個符文套裝的效果是「增加 25% 攻擊速度」？",
+    correctAnswer: 'B', 
+    options: [
+      { id: 'A', text: "暴走 (Violent)", color: '#e53e3e' },
+      { id: 'B', text: "迅捷 (Swift)", color: '#3182ce' },
+      { id: 'C', text: "絕望 (Despair)", color: '#d69e2e' },
+      { id: 'D', text: "激怒 (Rage)", color: '#805ad5' }
+    ],
+    timeLimit: 10 
+  }
+];
+
 const roomsData: Record<string, any> = {};
+const ADMIN_PASSWORD = 'admin1234'; // 🔑 後台登入密碼
 
 io.on('connection', (socket: Socket) => {
   console.log(`⚡ 系統提示: 裝置連線 (ID: ${socket.id})`);
 
+  // ==================== 【後台管理系統 API】 ====================
+  socket.on('admin_login', (password) => {
+    if (password === ADMIN_PASSWORD) {
+      socket.emit('admin_auth_success', questionBank);
+    } else {
+      socket.emit('admin_auth_fail');
+    }
+  });
+
+  socket.on('admin_add_q', (newQ) => {
+    newQ.id = Date.now(); // 給予唯一 ID
+    questionBank.push(newQ);
+    io.emit('admin_update_bank', questionBank); // 同步給所有在後台的人
+  });
+
+  socket.on('admin_del_q', (id) => {
+    questionBank = questionBank.filter(q => q.id !== id);
+    io.emit('admin_update_bank', questionBank);
+  });
+  // ==========================================================
+
+  // ==================== 【遊戲房間與流程 API】 ====================
   socket.on('join_room', ({ pin, username, isHost }) => {
     const roomPin = String(pin).trim();
     socket.join(roomPin);
     
     if (!roomsData[roomPin]) {
-      roomsData[roomPin] = { players: {}, startTime: 0, currentQuestion: null, stats: {} };
+      // 新增 currentQuestionIndex 來記錄現在跑到第幾題
+      roomsData[roomPin] = { players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 };
     }
     if (!isHost) {
       roomsData[roomPin].players[socket.id] = { username, score: 0, hasAnswered: false };
@@ -32,31 +71,27 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('host_send_question', (pin: string) => {
     const roomPin = String(pin).trim();
+    const room = roomsData[roomPin];
+    if (!room) return;
+
+    const qIndex = room.currentQuestionIndex || 0;
     
-    const questionData = {
-      id: 1,
-      text: "在《魔靈召喚》中，哪一個符文套裝的效果是「增加 25% 攻擊速度」？",
-      correctAnswer: 'B', 
-      options: [
-        { id: 'A', text: "暴走 (Violent)", color: '#e53e3e' },
-        { id: 'B', text: "迅捷 (Swift)", color: '#3182ce' },
-        { id: 'C', text: "絕望 (Despair)", color: '#d69e2e' },
-        { id: 'D', text: "激怒 (Rage)", color: '#805ad5' }
-      ],
-      timeLimit: 10 
-    };
+    // 檢查題庫是否還有題目
+    if (qIndex < questionBank.length) {
+      const questionData = questionBank[qIndex];
+      room.currentQuestion = questionData;
+      room.startTime = Date.now();
+      room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
 
-    roomsData[roomPin].currentQuestion = questionData;
-    roomsData[roomPin].startTime = Date.now();
-    // 初始化統計數據
-    roomsData[roomPin].stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
+      for (let id in room.players) {
+        room.players[id].hasAnswered = false;
+      }
 
-    for (let id in roomsData[roomPin].players) {
-      roomsData[roomPin].players[id].hasAnswered = false;
+      room.currentQuestionIndex = qIndex + 1; // 題目指標往前推進
+
+      const { correctAnswer, ...clientQuestionData } = questionData;
+      io.to(roomPin).emit('receive_question', clientQuestionData);
     }
-
-    const { correctAnswer, ...clientQuestionData } = questionData;
-    io.to(roomPin).emit('receive_question', clientQuestionData);
   });
 
   socket.on('submit_answer', ({ pin, answerId }) => {
@@ -79,7 +114,6 @@ io.on('connection', (socket: Socket) => {
         player.score += earnedScore;
       }
 
-      // 記錄該選項被選擇的次數
       if (room.stats[answerId] !== undefined) {
         room.stats[answerId]++;
       }
@@ -98,20 +132,19 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // 新增：觸發賽後復盤
   socket.on('host_show_review', (pin: string) => {
     const roomPin = String(pin).trim();
     const room = roomsData[roomPin];
     if (room) {
-      // 傳送完整題目(包含正確答案)與統計數據給前端
       io.to(roomPin).emit('review_updated', {
         question: room.currentQuestion,
-        stats: room.stats
+        stats: room.stats,
+        // 告訴前端，是否還有下一題
+        hasNextQuestion: room.currentQuestionIndex < questionBank.length 
       });
     }
   });
 
-  // 新增：觸發最終頒獎台 (取前 3 名)
   socket.on('host_show_podium', (pin: string) => {
     const roomPin = String(pin).trim();
     const room = roomsData[roomPin];
