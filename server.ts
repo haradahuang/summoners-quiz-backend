@@ -5,6 +5,11 @@ import { Server, Socket } from 'socket.io';
 const app = express();
 const server = http.createServer(app);
 
+// 👇 新增這段：專門做給 Render 雲端主機的「健康檢查 (Health Check)」
+app.get('/', (req, res) => {
+  res.send('✅ 天空之島伺服器正常運作中！(Server is running)');
+});
+
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 const roomsData: Record<string, any> = {};
