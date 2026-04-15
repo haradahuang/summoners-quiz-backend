@@ -11,7 +11,7 @@ app.get('/', (req, res) => {
 
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
-// 全域題庫 (預設先放一題，防止空蕩蕩)
+// 全域題庫
 let questionBank: any[] = [
   {
     id: Date.now(),
@@ -28,12 +28,11 @@ let questionBank: any[] = [
 ];
 
 const roomsData: Record<string, any> = {};
-const ADMIN_PASSWORD = 'admin1234'; // 🔑 後台登入密碼
+const ADMIN_PASSWORD = 'admin1234'; 
 
 io.on('connection', (socket: Socket) => {
   console.log(`⚡ 系統提示: 裝置連線 (ID: ${socket.id})`);
 
-  // ==================== 【後台管理系統 API】 ====================
   socket.on('admin_login', (password) => {
     if (password === ADMIN_PASSWORD) {
       socket.emit('admin_auth_success', questionBank);
@@ -43,24 +42,21 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('admin_add_q', (newQ) => {
-    newQ.id = Date.now(); // 給予唯一 ID
+    newQ.id = Date.now(); 
     questionBank.push(newQ);
-    io.emit('admin_update_bank', questionBank); // 同步給所有在後台的人
+    io.emit('admin_update_bank', questionBank); 
   });
 
   socket.on('admin_del_q', (id) => {
     questionBank = questionBank.filter(q => q.id !== id);
     io.emit('admin_update_bank', questionBank);
   });
-  // ==========================================================
 
-  // ==================== 【遊戲房間與流程 API】 ====================
   socket.on('join_room', ({ pin, username, isHost }) => {
     const roomPin = String(pin).trim();
     socket.join(roomPin);
     
     if (!roomsData[roomPin]) {
-      // 新增 currentQuestionIndex 來記錄現在跑到第幾題
       roomsData[roomPin] = { players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 };
     }
     if (!isHost) {
@@ -76,7 +72,6 @@ io.on('connection', (socket: Socket) => {
 
     const qIndex = room.currentQuestionIndex || 0;
     
-    // 檢查題庫是否還有題目
     if (qIndex < questionBank.length) {
       const questionData = questionBank[qIndex];
       room.currentQuestion = questionData;
@@ -87,10 +82,16 @@ io.on('connection', (socket: Socket) => {
         room.players[id].hasAnswered = false;
       }
 
-      room.currentQuestionIndex = qIndex + 1; // 題目指標往前推進
+      room.currentQuestionIndex = qIndex + 1;
 
+      // 👇 關鍵：把當前進度與總題數包裝傳給前端
       const { correctAnswer, ...clientQuestionData } = questionData;
-      io.to(roomPin).emit('receive_question', clientQuestionData);
+      const payload = {
+        ...clientQuestionData,
+        currentQIndex: room.currentQuestionIndex,
+        totalQuestions: questionBank.length
+      };
+      io.to(roomPin).emit('receive_question', payload);
     }
   });
 
@@ -139,7 +140,6 @@ io.on('connection', (socket: Socket) => {
       io.to(roomPin).emit('review_updated', {
         question: room.currentQuestion,
         stats: room.stats,
-        // 告訴前端，是否還有下一題
         hasNextQuestion: room.currentQuestionIndex < questionBank.length 
       });
     }
