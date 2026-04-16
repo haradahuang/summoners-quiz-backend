@@ -31,16 +31,16 @@ let questionBank: any[] = [
     type: 'match',
     text: "【魔靈觀察局】請將上方的魔靈與下方正確的「專屬美腿」配對！",
     topItems: [
-      { id: 'T1', name: '水殺手', img: 'https://via.placeholder.com/150/0984e3/FFFFFF?text=Water+Assassin' },
-      { id: 'T2', name: '火沙漠', img: 'https://via.placeholder.com/150/d63031/FFFFFF?text=Fire+Desert+Queen' },
-      { id: 'T3', name: '光瓦爾基里', img: 'https://via.placeholder.com/150/fdcb6e/FFFFFF?text=Light+Valkyrja' },
-      { id: 'T4', name: '暗殺手', img: 'https://via.placeholder.com/150/2d3436/FFFFFF?text=Dark+Assassin' }
+      { id: 'T1', name: '殺手', img: 'https://github.com/user-attachments/assets/ec7f6791-4bb9-4f5d-8a55-a126615b7531' },
+      { id: 'T2', name: '夢喵', img: 'https://github.com/user-attachments/assets/5e1c33d0-600e-40ea-aec2-8c2ae5ba1a57' },
+      { id: 'T3', name: '光瓦', img: 'https://github.com/user-attachments/assets/22282544-280c-4b42-b828-4105be49f9d8' },
+      { id: 'T4', name: '暗奧', img: 'https://github.com/user-attachments/assets/d1095420-621f-4e59-8463-a9c744e34939' }
     ],
     bottomItems: [
-      { id: 'B1', img: 'https://via.placeholder.com/150/dfe6e9/000000?text=Legs+1' },
-      { id: 'B2', img: 'https://via.placeholder.com/150/dfe6e9/000000?text=Legs+2' },
-      { id: 'B3', img: 'https://via.placeholder.com/150/dfe6e9/000000?text=Legs+3' },
-      { id: 'B4', img: 'https://via.placeholder.com/150/dfe6e9/000000?text=Legs+4' }
+      { id: 'B1', img: 'https://github.com/user-attachments/assets/0513bf21-6aee-4e46-99c8-d504410c298a' },
+      { id: 'B2', img: 'https://github.com/user-attachments/assets/5f1ed78c-d9d9-4491-aed6-ddc7ef677ce4' },
+      { id: 'B3', img: 'https://github.com/user-attachments/assets/b1af9733-fcd9-4842-aa2d-de199b67a08a' },
+      { id: 'B4', img: 'https://github.com/user-attachments/assets/b79bd322-07c4-4a4e-b517-f28510e8d722' }
     ],
     // 設定正確的配對組合 { 上方ID : 下方ID }
     correctMatches: { 'T1': 'B1', 'T2': 'B2', 'T3': 'B3', 'T4': 'B4' },
