@@ -31,16 +31,16 @@ let questionBank: any[] = [
     type: 'match',
     text: "【魔靈觀察局】請將上方的魔靈與下方正確的「專屬美腿」配對！",
     topItems: [
-      { id: 'T1', name: '殺手', img: 'https://postimg.cc/Wd5vVDhV][img]https://i.postimg.cc/Wd5vVDhV/m2.png' },
-      { id: 'T2', name: '夢喵', img: 'https://postimg.cc/pmsHv9pt][img]https://i.postimg.cc/pmsHv9pt/m4.png' },
-      { id: 'T3', name: '光瓦', img: 'https://postimg.cc/dhsYgRtJ][img]https://i.postimg.cc/dhsYgRtJ/m1.png' },
-      { id: 'T4', name: '暗奧', img: 'https://postimg.cc/DSxThW82][img]https://i.postimg.cc/DSxThW82/m3.png' }
+      { id: 'T1', name: '殺手', img: 'https://i.postimg.cc/Wd5vVDhV/m2.png' },
+      { id: 'T2', name: '夢喵', img: 'https://i.postimg.cc/pmsHv9pt/m4.png' },
+      { id: 'T3', name: '光瓦', img: 'https://i.postimg.cc/dhsYgRtJ/m1.png' },
+      { id: 'T4', name: '暗奧', img: 'https://i.postimg.cc/DSxThW82/m3.png' }
     ],
     bottomItems: [
-      { id: 'B1', img: 'https://postimages.org/][img]https://i.postimg.cc/ZBGmQ10f/leg1.jpg' },
-      { id: 'B2', img: 'https://postimages.org/][img]https://i.postimg.cc/jwpT1GC9/leg2.jpg' },
-      { id: 'B3', img: 'https://postimages.org/][img]https://i.postimg.cc/0MTv4LrB/leg3.jpg' },
-      { id: 'B4', img: 'https://postimages.org/][img]https://i.postimg.cc/7GF4RpbR/leg4.jpg' }
+      { id: 'B1', img: 'https://i.postimg.cc/ZBGmQ10f/leg1.jpg' },
+      { id: 'B2', img: 'https://i.postimg.cc/jwpT1GC9/leg2.jpg' },
+      { id: 'B3', img: 'https://i.postimg.cc/0MTv4LrB/leg3.jpg' },
+      { id: 'B4', img: 'https://i.postimg.cc/7GF4RpbR/leg4.jpg' }
     ],
     // 設定正確的配對組合 { 上方ID : 下方ID }
     correctMatches: { 'T1': 'B1', 'T2': 'B2', 'T3': 'B3', 'T4': 'B4' },
