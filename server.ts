@@ -3,126 +3,179 @@ import http from 'http';
 import { Server, Socket } from 'socket.io';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import cors from 'cors';
 
 dotenv.config();
 
 const app = express();
+app.use(cors());
+app.use(express.json()); // 允許後端接收 JSON 格式的 API 請求
+
 const server = http.createServer(app);
-
-app.get('/', (req, res) => { res.send('✅ 天空之島伺服器 (已連接資料庫) 正常運作中！'); });
-
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 // ==========================================
-// 💾 資料庫設定區塊
+// 💾 MongoDB 資料庫模型 (Schemas)
 // ==========================================
-
-// 從 Render 的保險箱讀取金鑰
 const MONGO_URI = process.env.MONGODB_URI || '';
 
-// 定義題目的資料格式
-const questionSchema = new mongoose.Schema({
-  id: Number, type: String, text: String, timeLimit: Number,
-  correctAnswer: String, options: mongoose.Schema.Types.Mixed,
-  topItems: mongoose.Schema.Types.Mixed, bottomItems: mongoose.Schema.Types.Mixed,
-  correctMatches: mongoose.Schema.Types.Mixed
-}, { strict: false });
+// 1. 管理員帳號模型
+const adminSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true } // 簡單密碼驗證
+});
+const Admin = mongoose.model('Admin', adminSchema);
 
-const Question = mongoose.model('Question', questionSchema);
+// 2. 題庫包模型 (一個帳號可以有多個題庫包)
+const quizPackSchema = new mongoose.Schema({
+  title: { type: String, required: true }, // 例如："公會週末挑戰賽"
+  author: { type: String, required: true }, // 建立者的 username
+  questions: { type: Array, default: [] }   // 包含該題庫的所有題目
+});
+const QuizPack = mongoose.model('QuizPack', quizPackSchema);
 
-let questionBank: any[] = [];
-
-// 啟動時連線到 MongoDB，並讀取題庫
 if (MONGO_URI) {
-  mongoose.connect(MONGO_URI)
-    .then(async () => {
-      console.log('✅ MongoDB 雲端資料庫連線成功！');
-      const questions = await Question.find({}, { _id: 0, __v: 0 });
-      
-      if (questions.length === 0) {
-        console.log('⚠️ 資料庫是空的，正在植入預設題目...');
-        const defaultQuestions = [
-          {
-            id: 1, type: 'choice', text: "在《魔靈召喚》中，哪一個符文套裝的效果是「增加 25% 攻擊速度」？", correctAnswer: 'B', 
-            options: [ { id: 'A', text: "暴走 (Violent)", color: '#e53e3e' }, { id: 'B', text: "迅捷 (Swift)", color: '#3182ce' }, { id: 'C', text: "絕望 (Despair)", color: '#d69e2e' }, { id: 'D', text: "激怒 (Rage)", color: '#805ad5' } ],
-            timeLimit: 15 
-          },
-          {
-            id: 2, type: 'match', text: "【魔靈觀察局】請將上方的魔靈與下方正確的「專屬美腿」配對！",
-            topItems: [ { id: 'T1', name: '夢喵', img: 'https://i.postimg.cc/pmsHv9pt/m4.png' }, { id: 'T2', name: '暗奧', img: 'https://i.postimg.cc/DSxThW82/m3.png' }, { id: 'T3', name: '光瓦', img: 'https://i.postimg.cc/dhsYgRtJ/m1.png' }, { id: 'T4', name: '殺手', img: 'https://i.postimg.cc/Wd5vVDhV/m2.png' } ],
-            bottomItems: [ { id: 'B1', img: 'https://i.postimg.cc/ZBGmQ10f/leg1.jpg' }, { id: 'B2', img: 'https://i.postimg.cc/jwpT1GC9/leg2.jpg' }, { id: 'B3', img: 'https://i.postimg.cc/0MTv4LrB/leg3.jpg' }, { id: 'B4', img: 'https://i.postimg.cc/7GF4RpbR/leg4.jpg' } ],
-            correctMatches: { 'T1': 'B1', 'T2': 'B2', 'T3': 'B3', 'T4': 'B4' }, timeLimit: 30 
-          }
-        ];
-        await Question.insertMany(defaultQuestions);
-        questionBank = defaultQuestions;
-      } else {
-        questionBank = questions;
-        console.log(`📚 成功載入 ${questionBank.length} 題題庫！`);
-      }
-    })
-    .catch(err => console.error('❌ MongoDB 連線失敗:', err));
-} else {
-  console.log('⚠️ 未設定 MONGODB_URI 環境變數，資料庫功能停用。');
+  mongoose.connect(MONGO_URI).then(() => console.log('✅ MongoDB SaaS 版連線成功！')).catch(err => console.error('❌ MongoDB 連線失敗:', err));
 }
 
 // ==========================================
-// 🎮 遊戲核心邏輯
+// 🌐 RESTful API 路由 (給另一個後台網頁用的)
 // ==========================================
 
+// API: 管理員註冊 (你可以自己用 API 工具打，或之後做個超級管理員介面)
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const existing = await Admin.findOne({ username });
+    if (existing) return res.status(400).json({ error: '帳號已存在' });
+    const newAdmin = new Admin({ username, password });
+    await newAdmin.save();
+    res.json({ message: '帳號建立成功！' });
+  } catch (error) { res.status(500).json({ error: '伺服器錯誤' }); }
+});
+
+// API: 管理員登入
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const user = await Admin.findOne({ username, password });
+    if (!user) return res.status(401).json({ error: '帳號或密碼錯誤' });
+    res.json({ message: '登入成功', username: user.username });
+  } catch (error) { res.status(500).json({ error: '伺服器錯誤' }); }
+});
+
+// API: 取得某人的所有題庫包
+app.get('/api/quizzes/:username', async (req, res) => {
+  try {
+    const quizzes = await QuizPack.find({ author: req.params.username });
+    res.json(quizzes);
+  } catch (error) { res.status(500).json({ error: '讀取失敗' }); }
+});
+
+// API: 儲存/更新題庫包
+app.post('/api/quizzes', async (req, res) => {
+  try {
+    const { id, title, author, questions } = req.body;
+    if (id) {
+      await QuizPack.findByIdAndUpdate(id, { title, questions });
+      res.json({ message: '題庫更新成功' });
+    } else {
+      const newQuiz = new QuizPack({ title, author, questions });
+      await newQuiz.save();
+      res.json({ message: '題庫建立成功', quiz: newQuiz });
+    }
+  } catch (error) { res.status(500).json({ error: '儲存失敗' }); }
+});
+
+// ==========================================
+// 🎮 遊戲核心邏輯 (Socket.IO)
+// ==========================================
 const roomsData: Record<string, any> = {};
-const ADMIN_PASSWORD = 'admin'; 
+
+// 生成 6 位數隨機房號
+function generatePIN() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 io.on('connection', (socket: Socket) => {
-  socket.on('admin_login', (password) => { if (password === ADMIN_PASSWORD) socket.emit('admin_auth_success', questionBank); else socket.emit('admin_auth_fail'); });
-  
-  socket.on('admin_add_q', async (newQ) => { 
-    newQ.id = Date.now(); 
-    questionBank.push(newQ); 
-    io.emit('admin_update_bank', questionBank); 
-    // 👇 同步儲存到雲端 👇
-    if(MONGO_URI) { try { await new Question(newQ).save(); } catch(e){ console.log("儲存失敗", e) } }
-  });
 
-  socket.on('admin_del_q', async (id) => { 
-    questionBank = questionBank.filter(q => q.id !== id); 
-    io.emit('admin_update_bank', questionBank); 
-    // 👇 同步從雲端刪除 👇
-    if(MONGO_URI) { try { await Question.deleteOne({ id: id }); } catch(e){ console.log("刪除失敗", e) } }
-  });
+  // 👇 關鍵升級：主持人選擇題庫後，生成專屬房間與連結 👇
+  socket.on('host_create_room', async (quizPackId) => {
+    try {
+      const quiz = await QuizPack.findById(quizPackId);
+      if (!quiz) return socket.emit('error', '找不到該題庫');
 
-  socket.on('join_room', ({ pin, username, isHost }) => {
-    const roomPin = String(pin).trim();
-    socket.join(roomPin);
-    if (!roomsData[roomPin]) { roomsData[roomPin] = { players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 }; } 
-    else if (isHost) {
-      roomsData[roomPin].currentQuestionIndex = 0; roomsData[roomPin].currentQuestion = null;
-      for (let id in roomsData[roomPin].players) { roomsData[roomPin].players[id].score = 0; roomsData[roomPin].players[id].hasAnswered = false; }
+      const pin = generatePIN();
+      roomsData[pin] = { 
+        hostSocketId: socket.id, // 綁定主持人身份
+        quizData: quiz,          // 載入該題庫
+        players: {}, 
+        startTime: 0, 
+        currentQuestion: null, 
+        stats: {}, 
+        currentQuestionIndex: 0 
+      };
+
+      socket.join(pin);
+      // 回傳房號與加入連結給主持人
+      socket.emit('room_created', { pin, joinUrl: `/?pin=${pin}` });
+    } catch (err) {
+      console.error(err);
     }
-    if (!isHost) roomsData[roomPin].players[socket.id] = { username, score: 0, hasAnswered: false };
+  });
+
+  // 玩家加入房間
+  socket.on('join_room', ({ pin, username }) => {
+    const roomPin = String(pin).trim();
+    const room = roomsData[roomPin];
     
-    const currentPlayers = Object.values(roomsData[roomPin].players).map((p: any) => ({ username: p.username, score: p.score }));
+    if (!room) return socket.emit('join_error', '房號不存在或遊戲已結束');
+    if (room.currentQuestionIndex > 0) return socket.emit('join_error', '遊戲已經開始，無法加入');
+
+    socket.join(roomPin);
+    room.players[socket.id] = { username, score: 0, hasAnswered: false };
+    
+    // 通知所有人更新名單
+    const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score }));
     io.to(roomPin).emit('update_players', currentPlayers);
   });
 
+  // 主持人發送題目
   socket.on('host_send_question', (pin: string) => {
-    const roomPin = String(pin).trim(); const room = roomsData[roomPin]; if (!room) return;
+    const room = roomsData[String(pin).trim()];
+    if (!room || room.hostSocketId !== socket.id) return; // 只有該房的主持人能操作
+
     const qIndex = room.currentQuestionIndex || 0;
-    if (qIndex < questionBank.length) {
-      const questionData = questionBank[qIndex]; room.currentQuestion = questionData; room.startTime = Date.now(); room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
+    const questions = room.quizData.questions;
+
+    if (qIndex < questions.length) {
+      const questionData = questions[qIndex]; 
+      room.currentQuestion = questionData; 
+      room.startTime = Date.now(); 
+      room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
+      
       for (let id in room.players) room.players[id].hasAnswered = false;
       room.currentQuestionIndex = qIndex + 1;
+
       const { correctAnswer, correctMatches, ...clientQuestionData } = questionData;
-      io.to(roomPin).emit('receive_question', { ...clientQuestionData, currentQIndex: room.currentQuestionIndex, totalQuestions: questionBank.length });
+      io.to(String(pin).trim()).emit('receive_question', { 
+        ...clientQuestionData, 
+        currentQIndex: room.currentQuestionIndex, 
+        totalQuestions: questions.length 
+      });
     }
   });
 
   socket.on('submit_answer', ({ pin, answerData }) => {
-    const roomPin = String(pin).trim(); const room = roomsData[roomPin]; const player = room?.players[socket.id];
+    const room = roomsData[String(pin).trim()];
+    const player = room?.players[socket.id];
+
     if (room && player && !player.hasAnswered) {
       player.hasAnswered = true;
-      const timeElapsed = (Date.now() - room.startTime) / 1000; const tMax = room.currentQuestion.timeLimit;
+      const timeElapsed = (Date.now() - room.startTime) / 1000; 
+      const tMax = room.currentQuestion.timeLimit;
       let isCorrect = false;
+
       if (room.currentQuestion.type === 'match') {
         const correct = room.currentQuestion.correctMatches;
         isCorrect = Object.keys(correct).every(k => correct[k] === answerData[k]) && Object.keys(answerData).length === Object.keys(correct).length;
@@ -130,6 +183,7 @@ io.on('connection', (socket: Socket) => {
         isCorrect = (answerData === room.currentQuestion.correctAnswer);
         if (room.stats[answerData] !== undefined) room.stats[answerData]++;
       }
+
       let earnedScore = 0;
       if (isCorrect) {
         earnedScore = Math.round(1000 * (1 - (timeElapsed / (2 * tMax))));
@@ -141,29 +195,38 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('host_show_leaderboard', (pin: string) => {
-    const roomPin = String(pin).trim();
-    if (roomsData[roomPin]) {
-      const top5 = Object.values(roomsData[roomPin].players).sort((a:any, b:any) => b.score - a.score).slice(0, 5);
-      io.to(roomPin).emit('leaderboard_updated', top5);
-      const allPlayers = Object.values(roomsData[roomPin].players).map((p: any) => ({ username: p.username, score: p.score }));
-      io.to(roomPin).emit('update_players', allPlayers);
+    const room = roomsData[String(pin).trim()];
+    if (room && room.hostSocketId === socket.id) {
+      const top5 = Object.values(room.players).sort((a:any, b:any) => b.score - a.score).slice(0, 5);
+      io.to(String(pin).trim()).emit('leaderboard_updated', top5);
+      const allPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score }));
+      io.to(String(pin).trim()).emit('update_players', allPlayers);
     }
   });
 
   socket.on('host_show_review', (pin: string) => {
-    const roomPin = String(pin).trim();
-    if (roomsData[roomPin]) io.to(roomPin).emit('review_updated', { question: roomsData[roomPin].currentQuestion, stats: roomsData[roomPin].stats, hasNextQuestion: roomsData[roomPin].currentQuestionIndex < questionBank.length });
-  });
-
-  socket.on('host_show_podium', (pin: string) => {
-    const roomPin = String(pin).trim();
-    if (roomsData[roomPin]) {
-      const top3 = Object.values(roomsData[roomPin].players).sort((a:any, b:any) => b.score - a.score).slice(0, 3);
-      io.to(roomPin).emit('podium_updated', top3);
+    const room = roomsData[String(pin).trim()];
+    if (room && room.hostSocketId === socket.id) {
+      io.to(String(pin).trim()).emit('review_updated', { 
+        question: room.currentQuestion, 
+        stats: room.stats, 
+        hasNextQuestion: room.currentQuestionIndex < room.quizData.questions.length 
+      });
     }
   });
 
-  socket.on('disconnect', () => console.log(`❌ 裝置斷線 (ID: ${socket.id})`));
+  socket.on('host_show_podium', (pin: string) => {
+    const room = roomsData[String(pin).trim()];
+    if (room && room.hostSocketId === socket.id) {
+      const top3 = Object.values(room.players).sort((a:any, b:any) => b.score - a.score).slice(0, 3);
+      io.to(String(pin).trim()).emit('podium_updated', top3);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // 簡單清理邏輯 (實務上可以做更嚴謹的房主斷線處理)
+    console.log(`❌ 裝置斷線 (ID: ${socket.id})`);
+  });
 });
 
-server.listen(process.env.PORT || 3001, () => console.log('🚀 伺服器啟動'));
+server.listen(process.env.PORT || 3001, () => console.log('🚀 企業級伺服器啟動'));
