@@ -9,7 +9,10 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// 👇 關鍵解鎖：將原本預設的 100kb 限制放寬到 50mb，讓 Base64 圖片資料可以順利進入大腦！ 👇
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
@@ -77,7 +80,6 @@ app.post('/api/quizzes', async (req, res) => {
   } catch (error) { res.status(500).json({ error: '儲存失敗' }); }
 });
 
-// 👇 新增：刪除題庫包 API 👇
 app.delete('/api/quizzes/:id', async (req, res) => {
   try {
     await QuizPack.findByIdAndDelete(req.params.id);
@@ -115,7 +117,6 @@ io.on('connection', (socket: Socket) => {
     socket.join(roomPin);
     room.players[socket.id] = { username, score: 0, hasAnswered: false };
     
-    // 👇 同步玩家名單與「是否已答題」狀態 👇
     const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
     io.to(roomPin).emit('update_players', currentPlayers);
   });
@@ -133,7 +134,6 @@ io.on('connection', (socket: Socket) => {
       const { correctAnswer, correctMatches, ...clientQuestionData } = questionData;
       io.to(roomPin).emit('receive_question', { ...clientQuestionData, currentQIndex: room.currentQuestionIndex, totalQuestions: questions.length });
       
-      // 更新狀態給主持人
       const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
       io.to(roomPin).emit('update_players', currentPlayers);
     }
@@ -162,7 +162,6 @@ io.on('connection', (socket: Socket) => {
       }
       socket.emit('answer_result', { isCorrect, earnedScore, totalScore: player.score });
       
-      // 👇 玩家送出答案後，即時更新進度給主持人看 👇
       const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
       io.to(roomPin).emit('update_players', currentPlayers);
     }
