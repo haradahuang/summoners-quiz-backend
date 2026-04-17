@@ -9,8 +9,6 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-
-// 👇 關鍵解鎖：將原本預設的 100kb 限制放寬到 50mb，讓 Base64 圖片資料可以順利進入大腦！ 👇
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -36,9 +34,6 @@ if (MONGO_URI) {
   mongoose.connect(MONGO_URI).then(() => console.log('✅ MongoDB 連線成功！')).catch(err => console.error('❌ MongoDB 連線失敗:', err));
 }
 
-// ==========================================
-// 🌐 API 路由
-// ==========================================
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -60,48 +55,31 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/quizzes/:username', async (req, res) => {
-  try {
-    const quizzes = await QuizPack.find({ author: req.params.username });
-    res.json(quizzes);
-  } catch (error) { res.status(500).json({ error: '讀取失敗' }); }
+  try { const quizzes = await QuizPack.find({ author: req.params.username }); res.json(quizzes); } 
+  catch (error) { res.status(500).json({ error: '讀取失敗' }); }
 });
 
 app.post('/api/quizzes', async (req, res) => {
   try {
     const { id, title, author, questions } = req.body;
-    if (id) {
-      await QuizPack.findByIdAndUpdate(id, { title, questions });
-      res.json({ message: '題庫更新成功' });
-    } else {
-      const newQuiz = new QuizPack({ title, author, questions });
-      await newQuiz.save();
-      res.json({ message: '題庫建立成功', quiz: newQuiz });
-    }
+    if (id) { await QuizPack.findByIdAndUpdate(id, { title, questions }); res.json({ message: '題庫更新成功' }); } 
+    else { const newQuiz = new QuizPack({ title, author, questions }); await newQuiz.save(); res.json({ message: '題庫建立成功', quiz: newQuiz }); }
   } catch (error) { res.status(500).json({ error: '儲存失敗' }); }
 });
 
 app.delete('/api/quizzes/:id', async (req, res) => {
-  try {
-    await QuizPack.findByIdAndDelete(req.params.id);
-    res.json({ message: '刪除成功' });
-  } catch (error) { res.status(500).json({ error: '刪除失敗' }); }
+  try { await QuizPack.findByIdAndDelete(req.params.id); res.json({ message: '刪除成功' }); } 
+  catch (error) { res.status(500).json({ error: '刪除失敗' }); }
 });
 
-
-// ==========================================
-// 🎮 遊戲核心邏輯 (Socket.IO)
-// ==========================================
 const roomsData: Record<string, any> = {};
-
 function generatePIN() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 
 io.on('connection', (socket: Socket) => {
-
   socket.on('host_create_room', async (quizPackId) => {
     try {
       const quiz = await QuizPack.findById(quizPackId);
       if (!quiz) return socket.emit('error', '找不到該題庫');
-
       const pin = generatePIN();
       roomsData[pin] = { hostSocketId: socket.id, quizData: quiz, players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 };
       socket.join(pin);
@@ -113,10 +91,8 @@ io.on('connection', (socket: Socket) => {
     const roomPin = String(pin).trim(); const room = roomsData[roomPin];
     if (!room) return socket.emit('join_error', '房號不存在或遊戲已結束');
     if (room.currentQuestionIndex > 0) return socket.emit('join_error', '遊戲已經開始，無法加入');
-
     socket.join(roomPin);
     room.players[socket.id] = { username, score: 0, hasAnswered: false };
-    
     const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
     io.to(roomPin).emit('update_players', currentPlayers);
   });
@@ -124,16 +100,16 @@ io.on('connection', (socket: Socket) => {
   socket.on('host_send_question', (pin: string) => {
     const roomPin = String(pin).trim(); const room = roomsData[roomPin];
     if (!room || room.hostSocketId !== socket.id) return;
-
     const qIndex = room.currentQuestionIndex || 0; const questions = room.quizData.questions;
     if (qIndex < questions.length) {
-      const questionData = questions[qIndex]; room.currentQuestion = questionData; room.startTime = Date.now(); room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0 }; 
+      const questionData = questions[qIndex]; room.currentQuestion = questionData; room.startTime = Date.now(); 
+      // 👇 初始化涵蓋 4 種題型的統計選項 👇
+      room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0, 'O': 0, 'X': 0 }; 
       for (let id in room.players) room.players[id].hasAnswered = false;
       room.currentQuestionIndex = qIndex + 1;
 
-      const { correctAnswer, correctMatches, ...clientQuestionData } = questionData;
+      const { correctAnswer, correctAnswers, correctMatches, ...clientQuestionData } = questionData;
       io.to(roomPin).emit('receive_question', { ...clientQuestionData, currentQIndex: room.currentQuestionIndex, totalQuestions: questions.length });
-      
       const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
       io.to(roomPin).emit('update_players', currentPlayers);
     }
@@ -146,10 +122,18 @@ io.on('connection', (socket: Socket) => {
       const timeElapsed = (Date.now() - room.startTime) / 1000; const tMax = room.currentQuestion.timeLimit;
       let isCorrect = false;
 
+      // 👇 擴充批改邏輯 👇
       if (room.currentQuestion.type === 'match') {
         const correct = room.currentQuestion.correctMatches;
         isCorrect = Object.keys(correct).every(k => correct[k] === answerData[k]) && Object.keys(answerData).length === Object.keys(correct).length;
+      } else if (room.currentQuestion.type === 'multi') {
+        // 多選題批改：陣列長度相同且內容完全一致
+        const correct = room.currentQuestion.correctAnswers || [];
+        const userAns = Array.isArray(answerData) ? answerData : [];
+        isCorrect = correct.length === userAns.length && correct.every((val: string) => userAns.includes(val));
+        userAns.forEach((a: string) => { if (room.stats[a] !== undefined) room.stats[a]++; });
       } else {
+        // 單選題 & 是非題批改
         isCorrect = (answerData === room.currentQuestion.correctAnswer);
         if (room.stats[answerData] !== undefined) room.stats[answerData]++;
       }
@@ -172,8 +156,6 @@ io.on('connection', (socket: Socket) => {
     if (room && room.hostSocketId === socket.id) {
       const top5 = Object.values(room.players).sort((a:any, b:any) => b.score - a.score).slice(0, 5);
       io.to(roomPin).emit('leaderboard_updated', top5);
-      const allPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
-      io.to(roomPin).emit('update_players', allPlayers);
     }
   });
 
