@@ -9,7 +9,6 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-// 允許傳輸大容量的 Base64 圖片資料
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -24,7 +23,6 @@ const adminSchema = new mongoose.Schema({
 });
 const Admin = mongoose.model('Admin', adminSchema);
 
-// 👇 更新題庫資料表：加入 backgroundImg 欄位 👇
 const quizPackSchema = new mongoose.Schema({
   title: { type: String, required: true },
   author: { type: String, required: true },
@@ -62,7 +60,6 @@ app.get('/api/quizzes/:username', async (req, res) => {
   catch (error) { res.status(500).json({ error: '讀取失敗' }); }
 });
 
-// 👇 更新 API：支援接收與更新 backgroundImg 👇
 app.post('/api/quizzes', async (req, res) => {
   try {
     const { id, title, author, backgroundImg, questions } = req.body;
@@ -86,6 +83,16 @@ const roomsData: Record<string, any> = {};
 function generatePIN() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 
 io.on('connection', (socket: Socket) => {
+  
+  // 👇 全新加入：提供前端在進房前「預先查詢」房間資訊的 API 👇
+  socket.on('check_room', (pin: string) => {
+    const roomPin = String(pin).trim(); 
+    const room = roomsData[roomPin];
+    if (room) {
+      socket.emit('room_info', { title: room.quizData.title, backgroundImg: room.quizData.backgroundImg });
+    }
+  });
+
   socket.on('host_create_room', async (quizPackId) => {
     try {
       const quiz = await QuizPack.findById(quizPackId);
@@ -93,7 +100,6 @@ io.on('connection', (socket: Socket) => {
       const pin = generatePIN();
       roomsData[pin] = { hostSocketId: socket.id, quizData: quiz, players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 };
       socket.join(pin);
-      // 👇 開房時，回傳標題與背景給主持人 👇
       socket.emit('room_created', { pin, joinUrl: `/?pin=${pin}`, title: quiz.title, backgroundImg: quiz.backgroundImg });
     } catch (err) { console.error(err); }
   });
@@ -104,7 +110,6 @@ io.on('connection', (socket: Socket) => {
     if (room.currentQuestionIndex > 0) return socket.emit('join_error', '遊戲已經開始，無法加入');
     socket.join(roomPin);
     
-    // 👇 玩家進房成功時，發送該房間的專屬標題與背景給玩家 👇
     socket.emit('room_info', { title: room.quizData.title, backgroundImg: room.quizData.backgroundImg });
 
     room.players[socket.id] = { username, score: 0, hasAnswered: false };
