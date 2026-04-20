@@ -9,6 +9,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+// 允許傳輸大容量的 Base64 圖片資料
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -23,9 +24,11 @@ const adminSchema = new mongoose.Schema({
 });
 const Admin = mongoose.model('Admin', adminSchema);
 
+// 👇 更新題庫資料表：加入 backgroundImg 欄位 👇
 const quizPackSchema = new mongoose.Schema({
   title: { type: String, required: true },
   author: { type: String, required: true },
+  backgroundImg: { type: String, default: '' }, 
   questions: { type: Array, default: [] }
 });
 const QuizPack = mongoose.model('QuizPack', quizPackSchema);
@@ -59,11 +62,18 @@ app.get('/api/quizzes/:username', async (req, res) => {
   catch (error) { res.status(500).json({ error: '讀取失敗' }); }
 });
 
+// 👇 更新 API：支援接收與更新 backgroundImg 👇
 app.post('/api/quizzes', async (req, res) => {
   try {
-    const { id, title, author, questions } = req.body;
-    if (id) { await QuizPack.findByIdAndUpdate(id, { title, questions }); res.json({ message: '題庫更新成功' }); } 
-    else { const newQuiz = new QuizPack({ title, author, questions }); await newQuiz.save(); res.json({ message: '題庫建立成功', quiz: newQuiz }); }
+    const { id, title, author, backgroundImg, questions } = req.body;
+    if (id) { 
+      await QuizPack.findByIdAndUpdate(id, { title, backgroundImg, questions }); 
+      res.json({ message: '題庫更新成功' }); 
+    } else { 
+      const newQuiz = new QuizPack({ title, author, backgroundImg, questions }); 
+      await newQuiz.save(); 
+      res.json({ message: '題庫建立成功', quiz: newQuiz }); 
+    }
   } catch (error) { res.status(500).json({ error: '儲存失敗' }); }
 });
 
@@ -83,7 +93,8 @@ io.on('connection', (socket: Socket) => {
       const pin = generatePIN();
       roomsData[pin] = { hostSocketId: socket.id, quizData: quiz, players: {}, startTime: 0, currentQuestion: null, stats: {}, currentQuestionIndex: 0 };
       socket.join(pin);
-      socket.emit('room_created', { pin, joinUrl: `/?pin=${pin}` });
+      // 👇 開房時，回傳標題與背景給主持人 👇
+      socket.emit('room_created', { pin, joinUrl: `/?pin=${pin}`, title: quiz.title, backgroundImg: quiz.backgroundImg });
     } catch (err) { console.error(err); }
   });
 
@@ -92,6 +103,10 @@ io.on('connection', (socket: Socket) => {
     if (!room) return socket.emit('join_error', '房號不存在或遊戲已結束');
     if (room.currentQuestionIndex > 0) return socket.emit('join_error', '遊戲已經開始，無法加入');
     socket.join(roomPin);
+    
+    // 👇 玩家進房成功時，發送該房間的專屬標題與背景給玩家 👇
+    socket.emit('room_info', { title: room.quizData.title, backgroundImg: room.quizData.backgroundImg });
+
     room.players[socket.id] = { username, score: 0, hasAnswered: false };
     const currentPlayers = Object.values(room.players).map((p: any) => ({ username: p.username, score: p.score, hasAnswered: p.hasAnswered }));
     io.to(roomPin).emit('update_players', currentPlayers);
@@ -103,7 +118,6 @@ io.on('connection', (socket: Socket) => {
     const qIndex = room.currentQuestionIndex || 0; const questions = room.quizData.questions;
     if (qIndex < questions.length) {
       const questionData = questions[qIndex]; room.currentQuestion = questionData; room.startTime = Date.now(); 
-      // 👇 初始化涵蓋 4 種題型的統計選項 👇
       room.stats = { 'A': 0, 'B': 0, 'C': 0, 'D': 0, 'O': 0, 'X': 0 }; 
       for (let id in room.players) room.players[id].hasAnswered = false;
       room.currentQuestionIndex = qIndex + 1;
@@ -122,18 +136,17 @@ io.on('connection', (socket: Socket) => {
       const timeElapsed = (Date.now() - room.startTime) / 1000; const tMax = room.currentQuestion.timeLimit;
       let isCorrect = false;
 
-      // 👇 擴充批改邏輯 👇
       if (room.currentQuestion.type === 'match') {
         const correct = room.currentQuestion.correctMatches;
         isCorrect = Object.keys(correct).every(k => correct[k] === answerData[k]) && Object.keys(answerData).length === Object.keys(correct).length;
       } else if (room.currentQuestion.type === 'multi') {
-        // 多選題批改：陣列長度相同且內容完全一致
         const correct = room.currentQuestion.correctAnswers || [];
         const userAns = Array.isArray(answerData) ? answerData : [];
         isCorrect = correct.length === userAns.length && correct.every((val: string) => userAns.includes(val));
         userAns.forEach((a: string) => { if (room.stats[a] !== undefined) room.stats[a]++; });
+      } else if (room.currentQuestion.type === 'order') {
+        isCorrect = (answerData === room.currentQuestion.correctAnswer);
       } else {
-        // 單選題 & 是非題批改
         isCorrect = (answerData === room.currentQuestion.correctAnswer);
         if (room.stats[answerData] !== undefined) room.stats[answerData]++;
       }
