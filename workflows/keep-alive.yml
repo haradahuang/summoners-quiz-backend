@@ -1,0 +1,25 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    # 設定為每 3 天的凌晨 00:00 自動執行一次 (UTC 時間)
+    - cron: '0 0 */3 * *'
+  # 允許手動在 GitHub 介面上觸發
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          # 這裡直接填入您在前端使用的那兩把金鑰
+          SUPABASE_URL: "https://kxungtkticxfnqmbdzlq.supabase.co/rest/v1/quiz_packs?select=id&limit=1"
+          SUPABASE_ANON_KEY: "sb_publishable_1J5xq2_aA5M1TJNk3CADAw_sFIuJ5Q7"
+        run: |
+          curl -X GET "$SUPABASE_URL" \
+          -H "apikey: $SUPABASE_ANON_KEY" \
+          -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+          -H "Content-Profile: application/json"
+          
+          echo "✅ 成功向 Supabase 發送活躍訊號，已重置 7 天休眠倒數！"
